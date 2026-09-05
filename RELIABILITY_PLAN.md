@@ -2,6 +2,19 @@
 
 Status: first lifecycle fixes in development; no pull request yet.
 
+Implemented for development testing: entry-owned session cleanup, MQTT task
+cancellation, energy timer unsubscription, login HTTP error classification,
+password-only reauthentication, bounded MQTT reconnect delays, and malformed
+message isolation. Small connection adapters retain the pinned library's
+device command implementations. See `tests/README.md` for test scope.
+
+Remaining before a device test build: full HA runtime verification, offline
+command errors/availability, REST reconciliation and partial device failures,
+energy error isolation, diagnostics, and packaging/rollback instructions.
+OAuth remains a separate feasibility investigation. Login rejection currently
+recognizes HTTP 401/403; other server-specific credential error formats require
+evidence before mapping them to reauthentication.
+
 Target installation: Home Assistant OS, Core 2026.9.0, Supervisor 2026.08.0,
 OS 18.2, Frontend 20260826.4. Currently using `ha-panasonic-miraie` via HACS.
 Test ACs: CS-CU-NU18ZKY5W and CS-CU-HU18CKY5XFMH-P.

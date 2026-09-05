@@ -1,6 +1,11 @@
 {
   "config": {
     "step": {
+      "reauth_confirm": {
+        "title": "Reconnect MirAIe",
+        "description": "Enter the current password for your existing MirAIe account.",
+        "data": {"password": "Password"}
+      },
       "user": {
         "data": {
           "host": "[%key:common::config_flow::data::host%]",
@@ -15,6 +20,7 @@
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
+      "reauth_successful": "Authentication updated successfully",
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
     }
   }

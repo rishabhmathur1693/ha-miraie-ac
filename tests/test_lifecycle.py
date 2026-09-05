@@ -26,7 +26,7 @@ def load_integration():
                  "homeassistant.config_entries", "homeassistant.const",
                  "homeassistant.core", "homeassistant.exceptions"):
         modules[name] = ModuleType(name)
-    modules["aiohttp"].ClientConnectionError = ConnectionFailure
+    modules["aiohttp"].ClientError = ConnectionFailure
     modules["miraie_ac"].MirAIeHub = object
     modules["miraie_ac"].MirAIeBroker = object
     modules["homeassistant.config_entries"].ConfigEntry = object
@@ -34,6 +34,12 @@ def load_integration():
         CLIMATE="climate", SWITCH="switch", SENSOR="sensor")
     modules["homeassistant.core"].HomeAssistant = object
     modules["homeassistant.exceptions"].ConfigEntryNotReady = NotReady
+    modules["homeassistant.exceptions"].ConfigEntryAuthFailed = type("AuthFailed", (Exception,), {})
+    connection = ModuleType("lifecycle_under_test.connection")
+    connection.AuthenticationRejected = type("Rejected", (Exception,), {})
+    connection.ReliableHub = object
+    connection.ReliableBroker = lambda callback: object()
+    modules[connection.__name__] = connection
     path = Path(__file__).resolve().parents[1] / "custom_components/miraie/__init__.py"
     spec = importlib.util.spec_from_file_location("lifecycle_under_test", path)
     module = importlib.util.module_from_spec(spec)
@@ -59,7 +65,7 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.hass = SimpleNamespace(data={}, config_entries=SimpleNamespace(
             async_forward_entry_setups=AsyncMock(),
             async_unload_platforms=AsyncMock(return_value=True)))
-        self.factory = patch.object(integration, "MirAIeHub", return_value=self.hub)
+        self.factory = patch.object(integration, "ReliableHub", return_value=self.hub)
         self.factory.start()
         self.addCleanup(self.factory.stop)
 

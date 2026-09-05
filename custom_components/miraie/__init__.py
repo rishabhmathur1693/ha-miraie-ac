@@ -3,15 +3,16 @@ from __future__ import annotations
 
 import asyncio
 
-from aiohttp import ClientConnectionError
-from miraie_ac import MirAIeBroker, MirAIeHub
+from aiohttp import ClientError
+from miraie_ac import MirAIeHub
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .const import DOMAIN
+from .connection import AuthenticationRejected, ReliableBroker, ReliableHub
 
 PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SWITCH, Platform.SENSOR]
 
@@ -33,11 +34,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
 
-    hub = MirAIeHub()
+    hub = ReliableHub()
     try:
-        broker = MirAIeBroker()
+        broker = ReliableBroker(lambda: entry.async_start_reauth(hass))
         await hub.init(entry.data["username"], entry.data["password"], broker)
-    except (ClientConnectionError, asyncio.TimeoutError) as err:
+    except AuthenticationRejected as err:
+        await _async_close_hub(hub)
+        raise ConfigEntryAuthFailed("MirAIe credentials were rejected") from err
+    except (ClientError, asyncio.TimeoutError) as err:
         await _async_close_hub(hub)
         raise ConfigEntryNotReady("Unable to connect to MirAIe") from err
     except BaseException:

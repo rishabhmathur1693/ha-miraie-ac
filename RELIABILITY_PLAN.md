@@ -1,6 +1,12 @@
 # MirAIe AC reliability implementation and device testing plan
 
-Status: planning; no runtime changes or pull request yet.
+Status: first lifecycle fixes in development; no pull request yet.
+
+Target installation: Home Assistant OS, Core 2026.9.0, Supervisor 2026.08.0,
+OS 18.2, Frontend 20260826.4. Currently using `ha-panasonic-miraie` via HACS.
+Test ACs: CS-CU-NU18ZKY5W and CS-CU-HU18CKY5XFMH-P.
+Keep the current integration available for rollback; disable its config entry
+when testing the replacement. Map old/new entity IDs explicitly for automations.
 
 Fork: https://github.com/rishabhmathur1693/ha-miraie-ac
 Branch: `feat/reliability-hardening`

@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone, timedelta
 
-import aiohttp
 from miraie_ac import Device as MirAIeDevice, MirAIeHub, ConsumptionPeriodType
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
@@ -44,8 +43,6 @@ class MirAIeEnergySensor(SensorEntity, ABC):
         """Update the sensor state with the latest energy consumption data."""
         now = datetime.now().astimezone()
         cutoff_time = now.replace(hour=CUTOFF_HOUR, minute=0, second=0, microsecond=0)
-        if not self.hub.http or self.hub.http.closed:
-            self.hub.http = aiohttp.ClientSession()
         consumption = await self.get_energy_consumption()
 
         """Consumption figures are updated on the server some time between 7-10 am the next day.
@@ -62,8 +59,6 @@ class MirAIeEnergySensor(SensorEntity, ABC):
     async def async_will_remove_from_hass(self):
         """Entity being removed from hass."""
         LOGGER.debug(f"Removing energy consumption entity ({self._attr_name}) from HA")
-        if self.hub.http and not self.hub.http.closed:
-            await self.hub.http.close()
         return await super().async_will_remove_from_hass()
 
     @abstractmethod
@@ -167,4 +162,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             await sensor.async_update()
             sensor.async_write_ha_state()  # Ensure HA is notified of new data
 
-    async_track_time_interval(hass, update_sensors, timedelta(minutes=30))
+    entry.async_on_unload(
+        async_track_time_interval(hass, update_sensors, timedelta(minutes=30))
+    )

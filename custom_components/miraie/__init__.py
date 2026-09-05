@@ -1,28 +1,57 @@
 """The mirAIe integration."""
 from __future__ import annotations
 
+import asyncio
+
+from aiohttp import ClientConnectionError
 from miraie_ac import MirAIeBroker, MirAIeHub
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN
 
-# For your initial PR, limit it to 1 platform.
 PLATFORMS: list[Platform] = [Platform.CLIMATE, Platform.SWITCH, Platform.SENSOR]
+
+
+async def _async_close_hub(hub: MirAIeHub) -> None:
+    """Stop the library's MQTT tasks before closing their HTTP session."""
+    tasks = list(hub.background_tasks)
+    for task in tasks:
+        task.cancel()
+    try:
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+    finally:
+        if not hub.http.closed:
+            await hub.http.close()
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up mirAIe from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
 
-    async with MirAIeHub() as hub:
+    hub = MirAIeHub()
+    try:
         broker = MirAIeBroker()
         await hub.init(entry.data["username"], entry.data["password"], broker)
-        hass.data[DOMAIN][entry.entry_id] = hub
+    except (ClientConnectionError, asyncio.TimeoutError) as err:
+        await _async_close_hub(hub)
+        raise ConfigEntryNotReady("Unable to connect to MirAIe") from err
+    except BaseException:
+        # Cancellation also needs to release a partially initialized hub.
+        await _async_close_hub(hub)
+        raise
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    try:
+        hass.data[DOMAIN][entry.entry_id] = hub
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        await _async_close_hub(hub)
+        raise
 
     return True
 
@@ -30,6 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hub = hass.data[DOMAIN].pop(entry.entry_id)
+        await _async_close_hub(hub)
 
     return unload_ok

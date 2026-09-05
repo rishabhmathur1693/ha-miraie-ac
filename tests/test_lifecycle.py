@@ -32,6 +32,7 @@ def load_integration():
     modules["homeassistant.config_entries"].ConfigEntry = object
     modules["homeassistant.const"].Platform = SimpleNamespace(
         CLIMATE="climate", SWITCH="switch", SENSOR="sensor")
+    modules["homeassistant.const"].EVENT_HOMEASSISTANT_STOP = "homeassistant_stop"
     modules["homeassistant.core"].HomeAssistant = object
     modules["homeassistant.exceptions"].ConfigEntryNotReady = NotReady
     modules["homeassistant.exceptions"].ConfigEntryAuthFailed = type("AuthFailed", (Exception,), {})
@@ -64,9 +65,9 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
         async def close():
             self.hub.http.closed = True
         self.hub.http.close = AsyncMock(side_effect=close)
-        self.entry = SimpleNamespace(entry_id="test", data={
+        self.entry = SimpleNamespace(entry_id="test", async_on_unload=Mock(), data={
             "username": "test", "password": "test"})
-        self.hass = SimpleNamespace(data={}, config_entries=SimpleNamespace(
+        self.hass = SimpleNamespace(data={}, bus=SimpleNamespace(async_listen_once=Mock()), config_entries=SimpleNamespace(
             async_forward_entry_setups=AsyncMock(),
             async_unload_platforms=AsyncMock(return_value=True)))
         self.factory = patch.object(integration, "ReliableHub", return_value=self.hub)

@@ -7,7 +7,7 @@ from aiohttp import ClientError
 from miraie_ac import MirAIeHub
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
@@ -60,6 +60,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN][entry.entry_id] = hub
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         hub.start_reconciliation(request_reauth)
+        async def stop_connection(event):
+            await _async_close_hub(hub)
+        entry.async_on_unload(
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, stop_connection)
+        )
     except BaseException:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         await _async_close_hub(hub)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 
 from miraie_ac import Device as MirAIeDevice, MirAIeHub, ConsumptionPeriodType
 from aiohttp import ClientError
@@ -43,6 +43,8 @@ class MirAIeEnergySensor(SensorEntity, ABC):
         self._attr_suggested_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_suggested_display_precision = 2
         self._attr_native_value = None
+        self._poll_tasks = set()
+        self._removing = False
 
     async def async_update(self):
         """Update the sensor state with the latest energy consumption data."""
@@ -71,12 +73,41 @@ class MirAIeEnergySensor(SensorEntity, ABC):
             """Skip update if no new data and it's before the cutoff time."""
             return
 
+        if consumption is None:
+            self._attr_available = False
+            return
         await self._set_last_reset_time()
         self._attr_native_value = consumption
 
+    async def async_added_to_hass(self):
+        await super().async_added_to_hass()
+        self._removing = False
+        self.async_on_remove(async_track_time_interval(
+            self.hass, self._async_poll, timedelta(minutes=30)
+        ))
+
+    async def _async_poll(self, now=None):
+        if self._removing or self._poll_tasks:
+            return
+        task = asyncio.current_task()
+        self._poll_tasks.add(task)
+        self.hub.background_tasks.add(task)
+        try:
+            await self.async_update()
+            if not self._removing:
+                self.async_write_ha_state()
+        finally:
+            self._poll_tasks.discard(task)
+            self.hub.background_tasks.discard(task)
+
     async def async_will_remove_from_hass(self):
-        """Entity being removed from hass."""
-        LOGGER.debug(f"Removing energy consumption entity ({self._attr_name}) from HA")
+        """Finish cancellation before the shared HTTP session is closed."""
+        self._removing = True
+        tasks = list(self._poll_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         return await super().async_will_remove_from_hass()
 
     @abstractmethod
@@ -84,10 +115,9 @@ class MirAIeEnergySensor(SensorEntity, ABC):
         """Fetch the latest power consumption data."""
         raise NotImplementedError
 
-    @abstractmethod
     async def _set_last_reset_time(self):
-        """Set the last reset time for the sensor entity."""
-        raise NotImplementedError
+        """Reset only when a reading for a reporting period is available."""
+        self._attr_last_reset = self._pending_reset
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -111,17 +141,11 @@ class MirAIeDailyEnergySensor(MirAIeEnergySensor):
     async def get_energy_consumption(self) -> float | None:
         """Fetch the latest daily energy consumption data."""
         yesterday = datetime.today().date() - timedelta(days=1)
+        self._pending_reset = datetime.combine(yesterday, datetime.min.time()).astimezone()
         date_string = yesterday.strftime("%d%m%Y")
         LOGGER.debug(f"Fetching {self.period_type.value} energy consumption for device: {self._attr_name}, period: {date_string}")
         consumption = await self.hub.get_energy_consumption(self.device, self.period_type, from_date=date_string)
         return consumption.get(date_string)
-
-    async def _set_last_reset_time(self):
-        """Set the last reset time for the daily energy sensor entity."""
-        now = datetime.now(timezone.utc).astimezone()
-        start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if not getattr(self, "_attr_last_reset", None) or self._attr_last_reset < start_of_today:
-            self._attr_last_reset = now
 
 class MirAIeWeeklyEnergySensor(MirAIeEnergySensor):
     @property
@@ -130,17 +154,12 @@ class MirAIeWeeklyEnergySensor(MirAIeEnergySensor):
 
     async def get_energy_consumption(self) -> float | None:
         """Fetch the latest weekly energy consumption data."""
-        date_string = get_last_sunday().strftime("%d%m%Y")
+        sunday = get_last_sunday()
+        self._pending_reset = datetime.combine(sunday, datetime.min.time()).astimezone()
+        date_string = sunday.strftime("%d%m%Y")
         LOGGER.debug(f"Fetching {self.period_type.value} energy consumption for device: {self._attr_name}, period: {date_string}")
         consumption = await self.hub.get_energy_consumption(self.device, self.period_type, from_date=date_string)
         return consumption.get(date_string)
-
-    async def _set_last_reset_time(self):
-        """Set the last reset time for the weekly energy sensor entity."""
-        now = datetime.now(timezone.utc).astimezone()
-        start_of_week = (now - timedelta(days=now.weekday() + 1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        if not getattr(self, "_attr_last_reset", None) or self._attr_last_reset < start_of_week:
-            self._attr_last_reset = now
 
 class MirAIeMonthlyEnergySensor(MirAIeEnergySensor):
     @property
@@ -151,16 +170,10 @@ class MirAIeMonthlyEnergySensor(MirAIeEnergySensor):
         """Fetch the latest monthly energy consumption data."""
         yesterday = datetime.today().date() - timedelta(days=1)
         date_string = yesterday.strftime("%m%Y")
+        self._pending_reset = datetime.combine(yesterday.replace(day=1), datetime.min.time()).astimezone()
         LOGGER.debug(f"Fetching {self.period_type.value} energy consumption for device: {self._attr_name}, period: {date_string}")
         consumption = await self.hub.get_energy_consumption(self.device, self.period_type, from_date=date_string)
         return consumption.get(date_string)
-
-    async def _set_last_reset_time(self):
-        """Set the last reset time for the monthly energy sensor entity."""
-        now = datetime.now(timezone.utc).astimezone()
-        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if not getattr(self, "_attr_last_reset", None) or self._attr_last_reset < start_of_month:
-            self._attr_last_reset = now
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
@@ -174,12 +187,3 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             MirAIeMonthlyEnergySensor(hub, device),
         ]
     async_add_entities(sensors, update_before_add=True)  # Register sensors
-
-    async def update_sensors(now=None):
-        for sensor in sensors:
-            await sensor.async_update()
-            sensor.async_write_ha_state()  # Ensure HA is notified of new data
-
-    entry.async_on_unload(
-        async_track_time_interval(hass, update_sensors, timedelta(minutes=30))
-    )

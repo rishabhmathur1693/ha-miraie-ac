@@ -1,6 +1,6 @@
 # MirAIe AC reliability implementation and device testing plan
 
-Status: first lifecycle fixes in development; no pull request yet.
+Status: 1.1.9b1 prepared for controlled two-AC testing; no pull request yet.
 
 Implemented for development testing: entry-owned session cleanup, MQTT task
 cancellation, energy timer unsubscription, login HTTP error classification,
@@ -21,9 +21,19 @@ diagnostics. MQTT updates received during a REST request take precedence over
 that response. The periodic task is owned by the entry and cancelled on unload.
 REST refresh does not enable commands while MQTT is unavailable.
 
-Remaining before a device test build: full HA runtime verification,
-packaging/rollback instructions, and energy reset-boundary coverage. Additional
-review should cover shutdown and sensor polling already in progress at unload.
+Validation: 32 regression tests and six real Home Assistant Core 2026.9.0
+runtime cases passed on Linux/Python 3.14.2 in
+[GitHub Actions](https://github.com/rishabhmathur1693/ha-miraie-ac/actions/runs/33996300787).
+The runtime suite checks two-device entity creation, password reauthentication
+with stable entity IDs, reload, unload, shutdown, cancellation of in-flight
+energy polling, and daily/weekly/monthly reporting-period reset boundaries.
+Only cloud/device IO is simulated in that suite.
+
+On macOS, runtime assertions passed but the Python process crashed during final
+garbage collection with both Python 3.14.2 and 3.14.7. Its root cause remains
+unresolved; the Linux run exited successfully. Do not claim macOS support from
+these results. Live Panasonic cloud behavior and both physical ACs still need
+testing. Installation and rollback instructions are in `TESTING.md`.
 OAuth remains a separate feasibility investigation. Login rejection currently
 recognizes HTTP 401/403; other server-specific credential error formats require
 evidence before mapping them to reauthentication.

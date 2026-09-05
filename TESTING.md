@@ -15,21 +15,28 @@ Do not delete it. The replacement uses the `miraie` domain, so it creates new
 devices and entities. Existing Panasonic-domain automations do not migrate
 automatically. Initially test the new entities manually.
 
-## Manual beta installation
+## HACS beta installation
 
-The beta archive contains `custom_components/miraie`. Extract it on your computer
-and copy that `miraie` folder into HA's `/config/custom_components/` using your
-existing file-access method. The resulting file must be
-`/config/custom_components/miraie/manifest.json`, showing version `1.1.9b1`.
-Do not overwrite or remove `/config/custom_components/panasonic_cloud`.
+1. In HACS, open **Integrations**, use the top-right menu, and select
+   **Custom repositories**.
+2. Add `https://github.com/rishabhmathur1693/ha-miraie-ac` with category
+   **Integration**.
+3. Open the resulting **MirAIe** repository and choose **Download**. Select
+   version `v1.1.9b1` if HACS asks for a version. It is a prerelease, so use
+   **Show beta versions** in the download dialog if necessary.
+4. Restart Home Assistant when HACS requests it.
+
+HACS stores the integration under `/config/custom_components/miraie`. It does
+not overwrite `/config/custom_components/panasonic_cloud`, because the two
+integrations use different domains.
 
 Restart Home Assistant. In Settings → Devices & services → Add integration,
 choose **MirAIe** and enter your MirAIe app account credentials. Phone usernames
 include the country code. This build still uses username/password authentication;
 OAuth is not included. Do not send credentials in bug reports or chat.
 
-Do not install upstream through HACS over this manual beta: that may replace the
-test code. The working Git branch is not assumed to be selectable in HACS.
+Keep the fork's HACS repository selected during testing. Installing the upstream
+`rkzofficial` repository would replace the beta's `miraie` directory.
 
 ## First-session checks
 

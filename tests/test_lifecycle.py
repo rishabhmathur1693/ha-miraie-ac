@@ -9,7 +9,7 @@ from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 class ConnectionFailure(Exception):
@@ -56,6 +56,9 @@ class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.hub = SimpleNamespace(background_tasks=set(), init=AsyncMock())
         self.hub.get_all_device_status = AsyncMock()
+        self.hub.notify_connection_changed = Mock()
+        self.hub.start_reconciliation = Mock()
+        self.hub.auth_required = False
         self.hub.http = SimpleNamespace(closed=False)
 
         async def close():

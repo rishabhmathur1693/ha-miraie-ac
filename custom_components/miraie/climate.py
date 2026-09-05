@@ -152,7 +152,7 @@ class MirAIeClimate(ClimateEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        return self.device.status.is_online
+        return self.device.broker.connected and self.device.status.is_online
 
     @property
     def hvac_mode(self) -> HVACMode | str | None:

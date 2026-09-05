@@ -81,7 +81,7 @@ class MirAIeDisplaySwitch(SwitchEntity):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
-        return self.device.status.is_online
+        return self.device.broker.connected and self.device.status.is_online
 
     @handle_command_errors
     async def async_turn_off(self) -> None:

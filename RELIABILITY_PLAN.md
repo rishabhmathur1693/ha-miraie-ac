@@ -14,11 +14,16 @@ isolation; bounded energy requests and rejection of invalid energy values.
 Failed energy updates preserve the last reading/reset timestamp and mark the
 sensor unavailable until a successful update. Failed commands are not replayed.
 
-Remaining before a device test build: full HA runtime verification, connection
-availability propagation, periodic REST reconciliation, diagnostics, and
-packaging/rollback instructions. Energy reset-boundary behavior also needs
-coverage. REST reconciliation currently runs at startup and MQTT connection;
-it is not a periodic fallback during a sustained broker outage.
+Added in the following batch: climate/display availability reflects MQTT
+connectivity; REST reconciliation every 15 minutes with a serialized refresh
+path; a single token-renewal retry on status HTTP 401; and aggregate-only
+diagnostics. MQTT updates received during a REST request take precedence over
+that response. The periodic task is owned by the entry and cancelled on unload.
+REST refresh does not enable commands while MQTT is unavailable.
+
+Remaining before a device test build: full HA runtime verification,
+packaging/rollback instructions, and energy reset-boundary coverage. Additional
+review should cover shutdown and sensor polling already in progress at unload.
 OAuth remains a separate feasibility investigation. Login rejection currently
 recognizes HTTP 401/403; other server-specific credential error formats require
 evidence before mapping them to reauthentication.

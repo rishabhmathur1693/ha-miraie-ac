@@ -35,9 +35,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     hub = ReliableHub()
+    def request_reauth():
+        if not hub.auth_required:
+            hub.auth_required = True
+            entry.async_start_reauth(hass)
+
     try:
         broker = ReliableBroker(
-            lambda: entry.async_start_reauth(hass), hub.get_all_device_status
+            request_reauth, hub.get_all_device_status, hub.notify_connection_changed
         )
         await hub.init(entry.data["username"], entry.data["password"], broker)
     except AuthenticationRejected as err:
@@ -54,6 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         hass.data[DOMAIN][entry.entry_id] = hub
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        hub.start_reconciliation(request_reauth)
     except BaseException:
         hass.data[DOMAIN].pop(entry.entry_id, None)
         await _async_close_hub(hub)

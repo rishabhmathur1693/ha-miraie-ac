@@ -18,6 +18,74 @@ spec.loader.exec_module(connection)
 
 
 class ConnectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_connection_changes_notify_once_per_transition(self):
+        notify = Mock()
+        broker = connection.ReliableBroker(Mock(), on_connection_change=notify)
+        broker._set_connected(True)
+        broker._set_connected(True)
+        broker._set_connected(False)
+        self.assertEqual(notify.call_count, 2)
+
+    async def test_periodic_refresh_recovers_after_failure(self):
+        async with connection.ReliableHub() as hub:
+            with patch.object(hub, "get_all_device_status", side_effect=[ValueError(), None]) as refresh, \
+                 patch.object(connection.asyncio, "sleep", side_effect=[None, None, asyncio.CancelledError()]):
+                with self.assertRaises(asyncio.CancelledError):
+                    await hub._reconcile_periodically(Mock(), 900)
+                self.assertEqual(refresh.await_count, 2)
+
+    async def test_periodic_auth_failure_requests_reauth_and_stops(self):
+        callback = Mock()
+        async with connection.ReliableHub() as hub:
+            with patch.object(hub, "get_all_device_status", side_effect=connection.AuthenticationRejected), \
+                 patch.object(connection.asyncio, "sleep", new_callable=AsyncMock):
+                await hub._reconcile_periodically(callback, 900)
+        callback.assert_called_once()
+
+    async def test_periodic_task_is_owned_and_cancellable(self):
+        async with connection.ReliableHub() as hub:
+            hub.start_reconciliation(Mock())
+            tasks = list(hub.background_tasks)
+            self.assertEqual(len(tasks), 1)
+            await asyncio.sleep(0)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self.assertTrue(tasks[0].cancelled())
+            self.assertFalse(hub.background_tasks)
+
+    async def test_status_401_renews_once_and_releases_responses(self):
+        async with connection.ReliableHub() as hub:
+            hub.user = SimpleNamespace(access_token="test")
+            unauthorized, success = AsyncMock(), AsyncMock()
+            unauthorized.__aenter__.return_value = Mock(status=401)
+            response = Mock(status=200)
+            response.json = AsyncMock(return_value={"onlineStatus": "true"})
+            success.__aenter__.return_value = response
+            with patch.object(hub.http, "get", side_effect=[unauthorized, success]), \
+                 patch.object(hub, "get_token", new_callable=AsyncMock) as renew:
+                self.assertEqual(await hub._status_payload("test"), {"onlineStatus": "true"})
+            renew.assert_awaited_once()
+            unauthorized.__aexit__.assert_awaited_once()
+            success.__aexit__.assert_awaited_once()
+
+    async def test_push_update_wins_over_in_flight_rest(self):
+        from miraie_ac import Device
+        broker = connection.ReliableBroker(Mock())
+        device = Device("test", "test", "test", "control", "status", "online", broker)
+        async with connection.ReliableHub() as hub:
+            hub.home = SimpleNamespace(devices=[device])
+
+            async def response(device_id):
+                device.status.temperature = 27
+                device.status.is_online = True
+                broker.revisions["status"] = 1
+                return {"onlineStatus": "false"}
+            with patch.object(hub, "_status_payload", side_effect=response):
+                await hub.get_all_device_status()
+            self.assertEqual(device.status.temperature, 27)
+            self.assertTrue(device.status.is_online)
+
     async def test_reconnect_refreshes_status_and_clears_transport(self):
         refresh = AsyncMock()
         broker = connection.ReliableBroker(Mock(), refresh)

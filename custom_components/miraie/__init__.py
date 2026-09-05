@@ -36,7 +36,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hub = ReliableHub()
     try:
-        broker = ReliableBroker(lambda: entry.async_start_reauth(hass))
+        broker = ReliableBroker(
+            lambda: entry.async_start_reauth(hass), hub.get_all_device_status
+        )
         await hub.init(entry.data["username"], entry.data["password"], broker)
     except AuthenticationRejected as err:
         await _async_close_hub(hub)

@@ -10,12 +10,16 @@ import json
 import logging
 import random
 import ssl
+from urllib.parse import quote
+from types import SimpleNamespace
 
 import aiohttp
 import aiomqtt
 import certifi
 from miraie_ac import MirAIeBroker, MirAIeHub
-from miraie_ac.constants import httpClientId, loginUrl
+from miraie_ac.constants import httpClientId, loginUrl, statusUrl
+from miraie_ac.device import DeviceStatus
+from miraie_ac.enums import PowerMode, FanMode, SwingMode, DisplayMode, HVACMode, PresetMode, ConvertiMode
 from miraie_ac.user import User
 from miraie_ac.utils import is_valid_email
 
@@ -24,6 +28,26 @@ LOGGER = logging.getLogger(__name__)
 
 class AuthenticationRejected(Exception):
     """The login endpoint explicitly rejected credentials."""
+
+
+class CommandUnavailable(aiomqtt.MqttError):
+    """A command could not be sent; it has not been queued for later."""
+
+
+class CommandClient:
+    """Keep the library's command builders, but guard the publish boundary."""
+
+    def __init__(self, broker):
+        self.broker = broker
+
+    async def publish(self, *args, **kwargs):
+        transport = self.broker.transport
+        if not self.broker.connected or transport is None:
+            raise CommandUnavailable("MirAIe is disconnected. Try again after reconnecting.")
+        try:
+            await transport.publish(*args, **kwargs)
+        except (aiomqtt.MqttError, asyncio.TimeoutError) as err:
+            raise CommandUnavailable("MirAIe could not send the command. Check its state before retrying.") from err
 
 
 class ReliableHub(MirAIeHub):
@@ -51,19 +75,56 @@ class ReliableHub(MirAIeHub):
         await self._authenticate(self.username, self.password)
         return self.user.access_token
 
+    async def get_all_device_status(self):
+        """Refresh each AC independently, including initial offline devices."""
+        for device in self.home.devices:
+            if not hasattr(device, "status"):
+                device.set_status(DeviceStatus(
+                    is_online=False, temperature=24.0, room_temperature=24.0,
+                    power_mode=PowerMode.OFF, fan_mode=FanMode.AUTO,
+                    v_swing_mode=SwingMode.AUTO, h_swing_mode=SwingMode.AUTO,
+                    display_mode=DisplayMode.ON, hvac_mode=HVACMode.AUTO,
+                    preset_mode=PresetMode.NONE, converti_mode=ConvertiMode.OFF,
+                ))
+            try:
+                url = statusUrl.replace("{deviceId}", quote(device.id, safe=""))
+                async with self.http.get(
+                    url, headers={"Authorization": f"Bearer {self.user.access_token}"},
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as response:
+                    response.raise_for_status()
+                    payload = await response.json()
+                if not isinstance(payload, dict):
+                    raise ValueError("Invalid status")
+                if str(payload.get("onlineStatus", "false")).lower() != "true":
+                    device.status.is_online = False
+                    device.refresh()
+                    continue
+                # Parse into a temporary holder first: no partial state writes.
+                holder = SimpleNamespace(status=device.status, refresh=lambda: None)
+                holder.set_status = lambda value: setattr(holder, "status", value)
+                type(device).status_handler(holder, {"acec": "off", **payload})
+                holder.status.is_online = True
+                device.set_status(holder.status)
+                device.refresh()
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError):
+                LOGGER.debug("MirAIe status refresh failed for one AC")
+
 
 class ReliableBroker(MirAIeBroker):
     """One reconnect loop with bounded backoff and message isolation."""
 
-    def __init__(self, on_auth_failure):
+    def __init__(self, on_auth_failure, refresh_status=None):
         super().__init__()
-        self.client = None
+        self.transport = None
+        self.client = CommandClient(self)
         self.connected = False
         self._on_auth_failure = on_auth_failure
+        self._refresh_status = refresh_status
 
     async def on_connect(self):
         for topic in self.commandTopics:
-            await self.client.subscribe(topic)
+            await self.transport.subscribe(topic)
 
     def on_message(self, message):
         callback = self.status_callbacks.get(message.topic.value)
@@ -91,12 +152,14 @@ class ReliableBroker(MirAIeBroker):
                     hostname=self.host, port=self.port, username=username,
                     password=password, tls_context=context,
                 ) as client:
-                    self.client = client
+                    self.transport = client
                     await self.on_connect()
                     self.connected = True
                     started = asyncio.get_running_loop().time()
                     LOGGER.debug("MirAIe MQTT connected")
                     try:
+                        if self._refresh_status is not None:
+                            await self._refresh_status()
                         async for message in client.messages:
                             self.on_message(message)
                     finally:
@@ -109,7 +172,7 @@ class ReliableBroker(MirAIeBroker):
                 LOGGER.debug("MirAIe connection interrupted; retrying")
             finally:
                 self.connected = False
-                self.client = None
+                self.transport = None
             # Also back off if the message stream ends without an exception.
             await asyncio.sleep(random.uniform(delay / 2, delay))
             delay = min(delay * 2, 120)

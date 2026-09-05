@@ -1,6 +1,8 @@
 """The MirAIe climate platform."""
 
 from __future__ import annotations
+
+from .commands import handle_command_errors
 from typing import Any
 from miraie_ac import (
     Device as MirAIeDevice,
@@ -81,9 +83,11 @@ class MirAIeDisplaySwitch(SwitchEntity):
         """Return True if entity is available."""
         return self.device.status.is_online
 
+    @handle_command_errors
     async def async_turn_off(self) -> None:
         await self.device.set_display_mode(DisplayMode.OFF)
 
+    @handle_command_errors
     async def async_turn_on(self) -> None:
         await self.device.set_display_mode(DisplayMode.ON)
 

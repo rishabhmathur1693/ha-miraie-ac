@@ -18,6 +18,72 @@ spec.loader.exec_module(connection)
 
 
 class ConnectionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_reconnect_refreshes_status_and_clears_transport(self):
+        refresh = AsyncMock()
+        broker = connection.ReliableBroker(Mock(), refresh)
+        broker.set_topics(["test"])
+        transport = AsyncMock()
+        transport.messages.__aiter__.return_value = []
+        client = AsyncMock()
+        client.__aenter__.return_value = transport
+        sleeps = 0
+
+        async def sleep(delay):
+            nonlocal sleeps
+            sleeps += 1
+            if sleeps == 2:
+                raise asyncio.CancelledError()
+        with patch.object(connection.aiomqtt, "Client", return_value=client), \
+             patch.object(connection.asyncio, "sleep", side_effect=sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await broker.connect("test", "test", AsyncMock(return_value="renewed"))
+        self.assertEqual(refresh.await_count, 2)
+        self.assertEqual(transport.subscribe.await_count, 2)
+        self.assertFalse(broker.connected)
+        self.assertIsNone(broker.transport)
+
+    async def test_offline_commands_are_not_queued(self):
+        broker = connection.ReliableBroker(Mock())
+        with self.assertRaises(connection.CommandUnavailable):
+            await broker.set_temperature("test", 24)
+        broker.transport = AsyncMock()
+        broker.connected = True
+        await broker.set_temperature("test", 25)
+        broker.transport.publish.assert_awaited_once()
+        payload = broker.transport.publish.call_args.args[1]
+        self.assertIn('"25"', payload)
+
+    async def test_publish_failure_is_actionable(self):
+        broker = connection.ReliableBroker(Mock())
+        broker.connected = True
+        broker.transport = AsyncMock()
+        broker.transport.publish.side_effect = aiomqtt.MqttError("network failure")
+        with self.assertRaises(connection.CommandUnavailable):
+            await broker.set_temperature("test", 24)
+
+    async def test_rest_failure_does_not_block_second_ac(self):
+        from miraie_ac import Device
+        broker = connection.ReliableBroker(Mock())
+        devices = [Device(str(i), "test", "test", str(i), str(i), str(i), broker)
+                   for i in range(2)]
+        payload = {"onlineStatus": "true", "actmp": "25", "rmtmp": "28",
+                   "ps": "on", "acfs": "auto", "acvs": 0, "achs": 0,
+                   "acdc": "on", "acmd": "cool", "acpm": "off", "acem": "off"}
+        failed = AsyncMock()
+        failed.__aenter__.side_effect = aiohttp.ClientConnectionError()
+        success = AsyncMock()
+        response = Mock()
+        response.json = AsyncMock(return_value=payload)
+        success.__aenter__.return_value = response
+        async with connection.ReliableHub() as hub:
+            hub.home = SimpleNamespace(devices=devices)
+            hub.user = SimpleNamespace(access_token="test")
+            with patch.object(hub.http, "get", side_effect=[failed, success]):
+                await hub.get_all_device_status()
+        self.assertFalse(devices[0].status.is_online)
+        self.assertTrue(devices[1].status.is_online)
+        self.assertEqual(devices[1].status.temperature, 25)
+
     async def test_login_status_classification_and_release(self):
         for status in (200, 401, 403, 429, 500):
             with self.subTest(status=status):
@@ -74,7 +140,7 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
         sleep.assert_awaited_once()
         reauth.assert_called_once()
         self.assertFalse(broker.connected)
-        self.assertIsNone(broker.client)
+        self.assertIsNone(broker.transport)
 
     async def test_retries_back_off_and_cancellation_propagates(self):
         broker = connection.ReliableBroker(Mock())
@@ -92,13 +158,13 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await broker.connect("test", "test", AsyncMock(return_value="new"))
         self.assertEqual(delays, [5, 10, 20, 40, 80, 120, 120])
-        self.assertIsNone(broker.client)
+        self.assertIsNone(broker.transport)
 
     async def test_subscription_does_not_print_device_topics(self):
         broker = connection.ReliableBroker(Mock())
-        broker.client = AsyncMock()
+        broker.transport = AsyncMock()
         broker.set_topics(["one", "two"])
         with patch("builtins.print") as output:
             await broker.on_connect()
-        self.assertEqual(broker.client.subscribe.await_count, 2)
+        self.assertEqual(broker.transport.subscribe.await_count, 2)
         output.assert_not_called()

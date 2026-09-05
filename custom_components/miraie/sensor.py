@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+import asyncio
+import math
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone, timedelta
 
 from miraie_ac import Device as MirAIeDevice, MirAIeHub, ConsumptionPeriodType
+from aiohttp import ClientError
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
@@ -43,7 +48,20 @@ class MirAIeEnergySensor(SensorEntity, ABC):
         """Update the sensor state with the latest energy consumption data."""
         now = datetime.now().astimezone()
         cutoff_time = now.replace(hour=CUTOFF_HOUR, minute=0, second=0, microsecond=0)
-        consumption = await self.get_energy_consumption()
+        try:
+            consumption = await asyncio.wait_for(self.get_energy_consumption(), timeout=30)
+            if consumption is not None:
+                if isinstance(consumption, bool):
+                    raise ValueError("Invalid energy value")
+                consumption = float(consumption)
+                if not math.isfinite(consumption) or consumption < 0:
+                    raise ValueError("Invalid energy value")
+        except (ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError):
+            # Keep the last reading/reset timestamp, but signal it is stale.
+            self._attr_available = False
+            LOGGER.debug("MirAIe energy update failed; retrying at the next interval")
+            return
+        self._attr_available = True
 
         """Consumption figures are updated on the server some time between 7-10 am the next day.
         This skips setting the state to unavailable if the value is None and it's not yet

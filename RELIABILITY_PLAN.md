@@ -8,9 +8,17 @@ password-only reauthentication, bounded MQTT reconnect delays, and malformed
 message isolation. Small connection adapters retain the pinned library's
 device command implementations. See `tests/README.md` for test scope.
 
-Remaining before a device test build: full HA runtime verification, offline
-command errors/availability, REST reconciliation and partial device failures,
-energy error isolation, diagnostics, and packaging/rollback instructions.
+Added in the next development batch: guarded MQTT publishes with Home Assistant
+action errors; REST status refresh on connection/reconnection with per-AC error
+isolation; bounded energy requests and rejection of invalid energy values.
+Failed energy updates preserve the last reading/reset timestamp and mark the
+sensor unavailable until a successful update. Failed commands are not replayed.
+
+Remaining before a device test build: full HA runtime verification, connection
+availability propagation, periodic REST reconciliation, diagnostics, and
+packaging/rollback instructions. Energy reset-boundary behavior also needs
+coverage. REST reconciliation currently runs at startup and MQTT connection;
+it is not a periodic fallback during a sustained broker outage.
 OAuth remains a separate feasibility investigation. Login rejection currently
 recognizes HTTP 401/403; other server-specific credential error formats require
 evidence before mapping them to reauthentication.

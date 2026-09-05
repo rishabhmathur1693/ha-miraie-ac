@@ -1,6 +1,8 @@
 """The MirAIe climate platform."""
 
 from __future__ import annotations
+
+from .commands import handle_command_errors
 from typing import Any
 from miraie_ac import (
     Device as MirAIeDevice,
@@ -231,12 +233,14 @@ class MirAIeClimate(ClimateEntity):
     async def async_turn_on(self) -> None:
         await self.async_set_hvac_mode(HVACMode.COOL)
 
+    @handle_command_errors
     async def async_set_temperature(self, **kwargs: Any) -> None:
         
         LOGGER.debug(f"Set temperature to {kwargs["temperature"]}")
         
         await self.device.set_temperature(kwargs["temperature"])
 
+    @handle_command_errors
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         
         LOGGER.debug(f"Set hvac mode to {hvac_mode}")
@@ -253,6 +257,7 @@ class MirAIeClimate(ClimateEntity):
             else:
                 await self.device.set_hvac_mode(MHVACMode(hvac_mode.value))
 
+    @handle_command_errors
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         
         LOGGER.debug(f"Set fan mode to {fan_mode}")
@@ -262,6 +267,7 @@ class MirAIeClimate(ClimateEntity):
         else:
             await self.device.set_fan_mode(FanMode(fan_mode))
 
+    @handle_command_errors
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         LOGGER.debug(f"Set swing vertical mode to {swing_mode}")
         if swing_mode == V1:
@@ -277,6 +283,7 @@ class MirAIeClimate(ClimateEntity):
         else:
             await self.device.set_v_swing_mode(SwingMode(0))
             
+    @handle_command_errors
     async def async_set_swing_horizontal_mode(self, swing_mode: str) -> None:
         LOGGER.debug(f"Set swing horizontal mode to {swing_mode}")    
         if swing_mode == H1:
@@ -292,6 +299,7 @@ class MirAIeClimate(ClimateEntity):
         else:
             await self.device.set_h_swing_mode(SwingMode(0))
 
+    @handle_command_errors
     async def async_set_preset_mode(self, preset_mode: str) -> None:
         
         LOGGER.debug(f"Set preset mode to {preset_mode}")

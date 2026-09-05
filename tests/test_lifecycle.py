@@ -38,7 +38,7 @@ def load_integration():
     connection = ModuleType("lifecycle_under_test.connection")
     connection.AuthenticationRejected = type("Rejected", (Exception,), {})
     connection.ReliableHub = object
-    connection.ReliableBroker = lambda callback: object()
+    connection.ReliableBroker = lambda *args: object()
     modules[connection.__name__] = connection
     path = Path(__file__).resolve().parents[1] / "custom_components/miraie/__init__.py"
     spec = importlib.util.spec_from_file_location("lifecycle_under_test", path)
@@ -55,6 +55,7 @@ integration = load_integration()
 class LifecycleTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.hub = SimpleNamespace(background_tasks=set(), init=AsyncMock())
+        self.hub.get_all_device_status = AsyncMock()
         self.hub.http = SimpleNamespace(closed=False)
 
         async def close():

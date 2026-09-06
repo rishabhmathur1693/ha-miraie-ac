@@ -86,7 +86,7 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(device.status.temperature, 27)
             self.assertTrue(device.status.is_online)
 
-    async def test_reconnect_refreshes_status_and_clears_transport(self):
+    async def test_reconnect_reuses_token_and_clears_transport(self):
         refresh = AsyncMock()
         broker = connection.ReliableBroker(Mock(), refresh)
         broker.set_topics(["test"])
@@ -101,12 +101,14 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
             sleeps += 1
             if sleeps == 2:
                 raise asyncio.CancelledError()
+        token_supplier = AsyncMock(return_value="renewed")
         with patch.object(connection.aiomqtt, "Client", return_value=client), \
              patch.object(connection.asyncio, "sleep", side_effect=sleep):
             with self.assertRaises(asyncio.CancelledError):
-                await broker.connect("test", "test", AsyncMock(return_value="renewed"))
+                await broker.connect("test", "test", token_supplier)
         self.assertEqual(refresh.await_count, 2)
         self.assertEqual(transport.subscribe.await_count, 2)
+        token_supplier.assert_not_awaited()
         self.assertFalse(broker.connected)
         self.assertIsNone(broker.transport)
 
@@ -196,19 +198,16 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
             broker.on_message(SimpleNamespace(topic=SimpleNamespace(value=topic), payload=payload))
         valid.assert_called_once_with({"ps": "on"})
 
-    async def test_auth_rejection_stops_retry_and_requests_reauth(self):
-        reauth = Mock()
-        broker = connection.ReliableBroker(reauth)
+    async def test_mqtt_failure_does_not_reauthenticate(self):
+        broker = connection.ReliableBroker(Mock())
         client = AsyncMock()
         client.__aenter__.side_effect = aiomqtt.MqttError("offline")
-        renew = AsyncMock(side_effect=connection.AuthenticationRejected)
+        token_supplier = AsyncMock(return_value="new")
         with patch.object(connection.aiomqtt, "Client", return_value=client), \
-             patch.object(connection.asyncio, "sleep", new_callable=AsyncMock) as sleep:
-            await broker.connect("test", "test", renew)
-        sleep.assert_awaited_once()
-        reauth.assert_called_once()
-        self.assertFalse(broker.connected)
-        self.assertIsNone(broker.transport)
+             patch.object(connection.asyncio, "sleep", side_effect=asyncio.CancelledError):
+            with self.assertRaises(asyncio.CancelledError):
+                await broker.connect("test", "test", token_supplier)
+        token_supplier.assert_not_awaited()
 
     async def test_retries_back_off_and_cancellation_propagates(self):
         broker = connection.ReliableBroker(Mock())
@@ -220,12 +219,14 @@ class ConnectionTests(unittest.IsolatedAsyncioTestCase):
             delays.append(delay)
             if len(delays) == 7:
                 raise asyncio.CancelledError()
+        token_supplier = AsyncMock(return_value="new")
         with patch.object(connection.aiomqtt, "Client", return_value=client), \
              patch.object(connection.random, "uniform", side_effect=lambda low, high: high), \
              patch.object(connection.asyncio, "sleep", side_effect=sleep):
             with self.assertRaises(asyncio.CancelledError):
-                await broker.connect("test", "test", AsyncMock(return_value="new"))
+                await broker.connect("test", "test", token_supplier)
         self.assertEqual(delays, [5, 10, 20, 40, 80, 120, 120])
+        token_supplier.assert_not_awaited()
         self.assertIsNone(broker.transport)
 
     async def test_subscription_does_not_print_device_topics(self):

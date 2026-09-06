@@ -207,15 +207,18 @@ class ReliableBroker(MirAIeBroker):
             # Payloads, topics and exception text can contain identifiers.
             LOGGER.debug("Ignored an invalid MirAIe MQTT update")
 
-    async def connect(self, username, access_token, get_token):
+    async def connect(self, username, access_token, _get_token):
+        """Reconnect with the issued token; never re-login for a transport drop.
+
+        The library passes a token supplier for historical reasons. Reusing it
+        after an ordinary MQTT interruption turns a broker outage into repeated
+        password logins, which can disturb other MirAIe sessions.
+        """
         context = ssl.create_default_context(cafile=certifi.where()) if self.use_ssl else None
         password = access_token
         delay = 5
-        renew = False
         while True:
             try:
-                if renew:
-                    password = await get_token()
                 async with aiomqtt.Client(
                     hostname=self.host, port=self.port, username=username,
                     password=password, tls_context=context,
@@ -245,4 +248,3 @@ class ReliableBroker(MirAIeBroker):
             # Also back off if the message stream ends without an exception.
             await asyncio.sleep(random.uniform(delay / 2, delay))
             delay = min(delay * 2, 120)
-            renew = True
